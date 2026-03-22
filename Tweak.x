@@ -22,18 +22,6 @@
 - (BOOL)isDownstreamPromotion;
 @end
 
-@interface PIThirdParty : NSObject
-- (PIPin *)sideswipePin;
-@end
-
-@interface PINPinCloseupGalleryViewController : UIViewController
-- (id)createPinsFilterWithRemoteModelCollection:(id)collection selectedIndexPath:(id)indexPath;
-@end
-
-@interface PINRemoteModelCollectionFilter : NSObject
-- (id)initWithRemoteModelCollection:(id)collection predicate:(id)predicate;
-@end
-
 @interface PINPinCloseupPinPromotionNode : NSObject
 @end
 
@@ -82,51 +70,13 @@ static BOOL isPinPromoted(id pin) {
 }
 %end
 
-// ======= Layer 2: Sideswipe — block ads from closeup gallery =======
-//
-// The gallery VC creates its pin filter via createPinsFilterWithRemoteModelCollection:.
-// We set a thread-local flag around that call so the PINRemoteModelCollectionFilter
-// init hook only wraps the predicate for the gallery's filter, not every filter in the app.
-
-static _Thread_local BOOL _galleryFilterContext = NO;
-
-%hook PINPinCloseupGalleryViewController
-- (id)createPinsFilterWithRemoteModelCollection:(id)collection selectedIndexPath:(id)indexPath {
-    _galleryFilterContext = YES;
-    id result = %orig;
-    _galleryFilterContext = NO;
-    return result;
-}
-%end
-
-%hook PINRemoteModelCollectionFilter
-- (id)initWithRemoteModelCollection:(id)collection predicate:(BOOL(^)(id model))predicate {
-    if (!_galleryFilterContext) return %orig;
-    // Wrap predicate to also reject promoted/ad pins in the gallery sideswipe
-    BOOL(^wrappedPredicate)(id model) = ^BOOL(id model) {
-        if (predicate && !predicate(model)) return NO;
-        if (isPinPromoted(model)) return NO;
-        return YES;
-    };
-    return %orig(collection, wrappedPredicate);
-}
-%end
-
-// Block third-party ad sideswipe pins entirely.
-// PIThirdParty.sideswipePin is a PIPin injected by third-party ad SDKs (Google etc.)
-%hook PIThirdParty
-- (PIPin *)sideswipePin {
-    return nil;
-}
-%end
+// ======= Layer 2: Sideswipe — TEMPORARILY DISABLED FOR DIAGNOSTICS =======
+// All sideswipe hooks removed to isolate which layer breaks swiping.
+// TODO: Re-enable with a working approach once the culprit is identified.
 
 // ======= Layer 3: PIPin model-level ad suppression =======
-// - promotedIsSideswipeDisabled: forces sideswipe ads off for every pin
 // - isAdsOnly/isAdsOnlyRP: prevents ad-only feed sections from rendering
 %hook PIPin
-- (BOOL)promotedIsSideswipeDisabled {
-    return YES;
-}
 - (BOOL)isAdsOnly { return NO; }
 - (BOOL)isAdsOnlyRP { return NO; }
 %end
