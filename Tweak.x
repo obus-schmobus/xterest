@@ -77,18 +77,6 @@ static BOOL isPinPromoted(id pin) {
     return NO;
 }
 
-// Returns a new array with all promoted pins removed
-static NSArray *filterPromotedPins(NSArray *pins) {
-    if (!pins || pins.count == 0) return pins;
-    NSMutableArray *filtered = [NSMutableArray arrayWithCapacity:pins.count];
-    for (id pin in pins) {
-        if (!isPinPromoted(pin)) {
-            [filtered addObject:pin];
-        }
-    }
-    return [filtered copy];
-}
-
 // ======= Layer 1: Grid — drop promoted pin nodes entirely =======
 %hook PINPinNode
 - (id)initWithPin:(id)pin displayAttributes:(DisplayAttributes *)attributes {
