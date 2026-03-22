@@ -25,6 +25,19 @@
 @interface PINPinCloseupPinPromotionNode : NSObject
 @end
 
+@interface PINPagerNode : NSObject
+- (NSInteger)currentPageIndex;
+- (void)scrollToPageAtIndex:(NSInteger)index animated:(BOOL)animated;
+@end
+
+@interface PINModelCollection : NSObject
+- (id)objectAtIndex:(NSInteger)index;
+- (NSInteger)count;
+@end
+
+@interface PINPinCloseupGalleryViewController : UIViewController
+@end
+
 @interface PINPinCloseupSponsorshipNode : NSObject
 @end
 
@@ -70,9 +83,54 @@ static BOOL isPinPromoted(id pin) {
 }
 %end
 
-// ======= Layer 2: Sideswipe — TEMPORARILY DISABLED FOR DIAGNOSTICS =======
-// All sideswipe hooks removed to isolate which layer breaks swiping.
-// TODO: Re-enable with a working approach once the culprit is identified.
+// ======= Layer 2: Sideswipe — auto-skip promoted pins in closeup gallery =======
+//
+// We cannot filter promoted pins from the pager's data source without breaking
+// index mapping and swiping. Instead, after each swipe completes, we check if
+// the landed-on page is a promoted pin and auto-advance past it.
+//
+// Uses _pinsFilter (PINModelCollection) to get the pin model at the current index,
+// and _pagerNode (PINPagerNode) to scroll programmatically.
+
+%hook PINPinCloseupGalleryViewController
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
+    %orig;
+
+    PINPagerNode *pager = nil;
+    PINModelCollection *filter = nil;
+    @try {
+        pager = [self valueForKey:@"_pagerNode"];
+        filter = [self valueForKey:@"_pinsFilter"];
+    } @catch (NSException *e) {
+        return;
+    }
+    if (!pager || !filter) return;
+
+    NSInteger idx = [pager currentPageIndex];
+    NSInteger total = [filter count];
+    if (idx < 0 || idx >= total) return;
+
+    id pin = [filter objectAtIndex:idx];
+    if (!isPinPromoted(pin)) return;
+
+    // Find next non-promoted pin in swipe direction (prefer forward, fallback backward)
+    for (NSInteger i = idx + 1; i < total; i++) {
+        id candidate = [filter objectAtIndex:i];
+        if (!isPinPromoted(candidate)) {
+            [pager scrollToPageAtIndex:i animated:YES];
+            return;
+        }
+    }
+    // Fallback: try backward
+    for (NSInteger i = idx - 1; i >= 0; i--) {
+        id candidate = [filter objectAtIndex:i];
+        if (!isPinPromoted(candidate)) {
+            [pager scrollToPageAtIndex:i animated:YES];
+            return;
+        }
+    }
+}
+%end
 
 // ======= Layer 3: PIPin model-level ad suppression =======
 // - isAdsOnly/isAdsOnlyRP: prevents ad-only feed sections from rendering
