@@ -34,9 +34,10 @@ make package THEOS_PACKAGE_SCHEME=rootless
 Multi-layered ad removal:
 
 1. **Grid** — Hooks `PINPinNode initWithPin:displayAttributes:`. Drops nodes with `pinType == 2` (promoted) or where the pin model reports promoted/sponsored.
-2. **Sideswipe** — Hooks `setCloseupPins:`, `setFeedPins:`, and `setPins:` on `PINPinCloseupGalleryViewController` to filter promoted pins from the data source before they enter the gallery collection view.
+2. **Sideswipe** — Blocks third-party ad sideswipes (`PIThirdParty.sideswipePin → nil`) and forces `promotedIsSideswipeDisabled → YES` on all `PIPin` objects to prevent promoted sideswipe content.
 3. **Ads-only sections** — Forces `isAdsOnly` and `isAdsOnlyRP` to `NO` on `PIPin`, preventing entire ad-only carousels from rendering.
 4. **Closeup UI cleanup** — Collapses ad-specific Texture nodes (`PINPinCloseupPinPromotionNode`, `PINPinCloseupSponsorshipNode`, etc.) to zero size so no "Promoted by" or sponsorship UI leaks through.
+5. **Search** — Disables promoted pins in search requests (`PISearchRequestParameters.enablePromotedPins → NO`), blocks dynamic ad insertion into search feeds, and prevents re-enabling promoted pins on filter changes.
 
 ## License
 

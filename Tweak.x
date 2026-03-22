@@ -29,10 +29,6 @@
 - (PIPin *)sideswipePin;
 @end
 
-@interface PINRemoteModelCollectionFilter : NSObject
-- (id)initWithRemoteModelCollection:(id)collection predicate:(id)predicate;
-@end
-
 @interface PINPinCloseupGalleryViewController : UIViewController
 @end
 
@@ -72,8 +68,6 @@ static BOOL isPinPromoted(id pin) {
     if ([pin respondsToSelector:@selector(isShoppingAd)] && [pin isShoppingAd]) return YES;
     if ([pin respondsToSelector:@selector(isSubtleAd)] && [pin isSubtleAd]) return YES;
     if ([pin respondsToSelector:@selector(isDownstreamPromotion)] && [pin isDownstreamPromotion]) return YES;
-    if ([pin respondsToSelector:@selector(adData)] && [pin adData] != nil) return YES;
-    if ([pin respondsToSelector:@selector(promoter)] && [pin promoter] != nil) return YES;
     return NO;
 }
 
@@ -88,28 +82,14 @@ static BOOL isPinPromoted(id pin) {
 
 // ======= Layer 2: Sideswipe — block ads from closeup gallery =======
 //
-// PINPinCloseupGalleryViewController uses a PINRemoteModelCollection fed through
-// a PINRemoteModelCollectionFilter (with a predicate block). The filter's predicate
-// decides which pins appear in the sideswipe gallery.
+// Sideswipe ads are handled by:
+// (a) PIThirdParty.sideswipePin → nil (blocks 3rd-party ad sideswipes)
+// (b) promotedIsSideswipeDisabled → YES on all PIPin objects (Layer 3)
+// (c) Layer 1 PINPinNode hook already drops promoted pin nodes
 //
-// Strategy:
-// (a) Wrap the filter's predicate to also reject promoted/ad pins.
-// (b) Hook PIThirdParty.sideswipePin to return nil (blocks 3rd-party ad sideswipes).
-// (c) Force promotedIsSideswipeDisabled → YES on all PIPin objects (Layer 3).
-
-%hook PINRemoteModelCollectionFilter
-- (id)initWithRemoteModelCollection:(id)collection predicate:(BOOL(^)(id model))predicate {
-    // Wrap the predicate to also reject promoted/ad pins
-    BOOL(^wrappedPredicate)(id model) = ^BOOL(id model) {
-        // First check original predicate
-        if (predicate && !predicate(model)) return NO;
-        // Then reject promoted pins
-        if (isPinPromoted(model)) return NO;
-        return YES;
-    };
-    return %orig(collection, wrappedPredicate);
-}
-%end
+// NOTE: We intentionally do NOT hook PINRemoteModelCollectionFilter globally
+// because it's used throughout the app (boards, invitations, contacts, etc.)
+// and wrapping all predicates breaks normal pin swiping.
 
 // Block third-party ad sideswipe pins entirely.
 // PIThirdParty.sideswipePin is a PIPin injected by third-party ad SDKs (Google etc.)
