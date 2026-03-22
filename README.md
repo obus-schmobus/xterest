@@ -31,7 +31,12 @@ make package THEOS_PACKAGE_SCHEME=rootless
 
 ## How it works
 
-Hooks `PINPinNode` and checks `displayAttributes.pinType`. If `pinType == 2` (promoted), the pin is dropped.
+Multi-layered ad removal:
+
+1. **Grid** — Hooks `PINPinNode initWithPin:displayAttributes:`. Drops nodes with `pinType == 2` (promoted) or where the pin model reports promoted/sponsored.
+2. **Sideswipe** — Hooks `setCloseupPins:`, `setFeedPins:`, and `setPins:` on `PINPinCloseupGalleryViewController` to filter promoted pins from the data source before they enter the gallery collection view.
+3. **Ads-only sections** — Forces `isAdsOnly` and `isAdsOnlyRP` to `NO` on `PIPin`, preventing entire ad-only carousels from rendering.
+4. **Closeup UI cleanup** — Collapses ad-specific Texture nodes (`PINPinCloseupPinPromotionNode`, `PINPinCloseupSponsorshipNode`, etc.) to zero size so no "Promoted by" or sponsorship UI leaks through.
 
 ## License
 
