@@ -25,17 +25,7 @@
 @interface PINPinCloseupPinPromotionNode : NSObject
 @end
 
-@interface PINPagerNode : NSObject
-- (NSInteger)currentPageIndex;
-- (void)scrollToPageAtIndex:(NSInteger)index animated:(BOOL)animated;
-@end
-
-@interface PINModelCollection : NSObject
-- (id)objectAtIndex:(NSInteger)index;
-- (NSInteger)count;
-@end
-
-@interface PINPinCloseupGalleryViewController : UIViewController
+@interface PINRemoteModelCollection : NSObject
 @end
 
 @interface PINPinCloseupSponsorshipNode : NSObject
@@ -83,53 +73,76 @@ static BOOL isPinPromoted(id pin) {
 }
 %end
 
-// ======= Layer 2: Sideswipe — auto-skip promoted pins in closeup gallery =======
+// ======= Layer 2: Data-layer — strip promoted pins from model collections =======
 //
-// We cannot filter promoted pins from the pager's data source without breaking
-// index mapping and swiping. Instead, after each swipe completes, we check if
-// the landed-on page is a promoted pin and auto-advance past it.
-//
-// Uses _pinsFilter (PINModelCollection) to get the pin model at the current index,
-// and _pagerNode (PINPagerNode) to scroll programmatically.
+// Hook all insertion paths on PINRemoteModelCollection so promoted PIPin objects
+// never enter any collection. This blocks ads across all surfaces (grid, sideswipe,
+// search, related pins) without corrupting pager index mapping.
 
-%hook PINPinCloseupGalleryViewController
-- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
-    %orig;
+// Helper: filter promoted PIPin objects from an array, returns nil if nothing removed
+static NSArray *filterPromotedFromArray(NSArray *objects) {
+    if (!objects || objects.count == 0) return objects;
+    Class pinClass = NSClassFromString(@"PIPin");
+    if (!pinClass) return objects;
+    // Quick check: does this array contain PIPin objects?
+    id firstObj = objects.firstObject;
+    if (![firstObj isKindOfClass:pinClass]) return objects;
+    NSMutableArray *filtered = [NSMutableArray arrayWithCapacity:objects.count];
+    for (id obj in objects) {
+        if ([obj isKindOfClass:pinClass] && isPinPromoted(obj)) continue;
+        [filtered addObject:obj];
+    }
+    if (filtered.count == objects.count) return objects; // nothing removed
+    return filtered;
+}
 
-    PINPagerNode *pager = nil;
-    PINModelCollection *filter = nil;
-    @try {
-        pager = [self valueForKey:@"_pagerNode"];
-        filter = [self valueForKey:@"_pinsFilter"];
-    } @catch (NSException *e) {
+%hook PINRemoteModelCollection
+
+- (void)addObjects:(NSArray *)objects withAction:(NSInteger)action atIndexes:(NSIndexSet *)indexes completion:(id)completion {
+    NSArray *filtered = filterPromotedFromArray(objects);
+    if (filtered.count == objects.count) {
+        %orig(objects, action, indexes, completion);
         return;
     }
-    if (!pager || !filter) return;
-
-    NSInteger idx = [pager currentPageIndex];
-    NSInteger total = [filter count];
-    if (idx < 0 || idx >= total) return;
-
-    id pin = [filter objectAtIndex:idx];
-    if (!isPinPromoted(pin)) return;
-
-    // Find next non-promoted pin in swipe direction (prefer forward, fallback backward)
-    for (NSInteger i = idx + 1; i < total; i++) {
-        id candidate = [filter objectAtIndex:i];
-        if (!isPinPromoted(candidate)) {
-            [pager scrollToPageAtIndex:i animated:YES];
-            return;
+    if (filtered.count == 0) return; // all were promoted
+    // Rebuild index set: take first N indexes from the original set matching filtered count
+    NSMutableIndexSet *newIndexes = [NSMutableIndexSet indexSet];
+    __block NSUInteger count = 0;
+    [indexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL *stop) {
+        if (count < filtered.count) {
+            [newIndexes addIndex:idx];
+            count++;
+        } else {
+            *stop = YES;
         }
-    }
-    // Fallback: try backward
-    for (NSInteger i = idx - 1; i >= 0; i--) {
-        id candidate = [filter objectAtIndex:i];
-        if (!isPinPromoted(candidate)) {
-            [pager scrollToPageAtIndex:i animated:YES];
-            return;
-        }
-    }
+    }];
+    %orig(filtered, action, newIndexes, completion);
 }
+
+- (void)insertObjects:(NSArray *)objects atIndexes:(NSIndexSet *)indexes {
+    NSArray *filtered = filterPromotedFromArray(objects);
+    if (filtered.count == objects.count) {
+        %orig(objects, indexes);
+        return;
+    }
+    if (filtered.count == 0) return;
+    NSMutableIndexSet *newIndexes = [NSMutableIndexSet indexSet];
+    __block NSUInteger count = 0;
+    [indexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL *stop) {
+        if (count < filtered.count) {
+            [newIndexes addIndex:idx];
+            count++;
+        } else {
+            *stop = YES;
+        }
+    }];
+    %orig(filtered, newIndexes);
+}
+
+- (void)setPrependedObjects:(NSArray *)objects {
+    %orig(filterPromotedFromArray(objects));
+}
+
 %end
 
 // ======= Layer 3: PIPin model-level ad suppression =======

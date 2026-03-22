@@ -33,8 +33,8 @@ make package THEOS_PACKAGE_SCHEME=rootless
 
 Multi-layered ad removal:
 
-1. **Grid** — Hooks `PINPinNode initWithPin:displayAttributes:`. Drops nodes with `pinType == 2` (promoted) or where the pin model reports promoted/sponsored.
-2. **Sideswipe** — Blocks third-party ad sideswipes (`PIThirdParty.sideswipePin → nil`) and forces `promotedIsSideswipeDisabled → YES` on all `PIPin` objects to prevent promoted sideswipe content.
+1. **Grid fallback** — Hooks `PINPinNode initWithPin:displayAttributes:`. Drops nodes with `pinType == 2` (promoted) or where the pin model reports promoted/sponsored. Acts as a UI-level safety net.
+2. **Data-layer filtering** — Hooks all insertion paths on `PINRemoteModelCollection` (`addObjects:withAction:atIndexes:completion:`, `insertObjects:atIndexes:`, `setPrependedObjects:`) to strip promoted `PIPin` objects before they enter any model collection. This prevents ads from appearing in all surfaces (grid, sideswipe, search, related pins) without breaking pager index mapping.
 3. **Ads-only sections** — Forces `isAdsOnly` and `isAdsOnlyRP` to `NO` on `PIPin`, preventing entire ad-only carousels from rendering.
 4. **Closeup UI cleanup** — Collapses ad-specific Texture nodes (`PINPinCloseupPinPromotionNode`, `PINPinCloseupSponsorshipNode`, etc.) to zero size so no "Promoted by" or sponsorship UI leaks through.
 5. **Search** — Disables promoted pins in search requests (`PISearchRequestParameters.enablePromotedPins → NO`), blocks dynamic ad insertion into search feeds, and prevents re-enabling promoted pins on filter changes.
