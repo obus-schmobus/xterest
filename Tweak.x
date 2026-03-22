@@ -14,8 +14,23 @@
 - (BOOL)isPromotedPin;
 - (BOOL)isThirdPartyAd;
 - (BOOL)isSponsored;
+- (BOOL)isActiveAd;
+- (BOOL)isShoppingAd;
+- (BOOL)isSubtleAd;
 - (BOOL)isAdsOnly;
 - (BOOL)isAdsOnlyRP;
+- (BOOL)isDownstreamPromotion;
+- (id)thirdPartyAdInfo;
+- (id)adData;
+- (id)promoter;
+@end
+
+@interface PIThirdParty : NSObject
+- (PIPin *)sideswipePin;
+@end
+
+@interface PINRemoteModelCollectionFilter : NSObject
+- (id)initWithRemoteModelCollection:(id)collection predicate:(id)predicate;
 @end
 
 @interface PINPinCloseupGalleryViewController : UIViewController
@@ -33,6 +48,19 @@
 @interface PINPinCloseupAdCloseupRPSourceNode : NSObject
 @end
 
+@interface PISearchRequestParameters : NSObject
+- (BOOL)enablePromotedPins;
+@end
+
+@interface PINSearchResultsViewController : UIViewController
+@end
+
+@interface PIContentInteractionHandler : NSObject
+@end
+
+@interface PIDynamicInsertionPayloadAPIController : NSObject
+@end
+
 // Returns YES if the pin object is any kind of ad/promoted content
 static BOOL isPinPromoted(id pin) {
     if (!pin) return NO;
@@ -40,6 +68,12 @@ static BOOL isPinPromoted(id pin) {
     if ([pin respondsToSelector:@selector(isPromotedPin)] && [pin isPromotedPin]) return YES;
     if ([pin respondsToSelector:@selector(isThirdPartyAd)] && [pin isThirdPartyAd]) return YES;
     if ([pin respondsToSelector:@selector(isSponsored)] && [pin isSponsored]) return YES;
+    if ([pin respondsToSelector:@selector(isActiveAd)] && [pin isActiveAd]) return YES;
+    if ([pin respondsToSelector:@selector(isShoppingAd)] && [pin isShoppingAd]) return YES;
+    if ([pin respondsToSelector:@selector(isSubtleAd)] && [pin isSubtleAd]) return YES;
+    if ([pin respondsToSelector:@selector(isDownstreamPromotion)] && [pin isDownstreamPromotion]) return YES;
+    if ([pin respondsToSelector:@selector(adData)] && [pin adData] != nil) return YES;
+    if ([pin respondsToSelector:@selector(promoter)] && [pin promoter] != nil) return YES;
     return NO;
 }
 
@@ -64,34 +98,52 @@ static NSArray *filterPromotedPins(NSArray *pins) {
 }
 %end
 
-// ======= Layer 2: Sideswipe — filter promoted pins from gallery data =======
-// The closeup gallery VC has closeupPins and feedPins arrays that feed the
-// sideswipe collection view. Filter promoted pins before they enter the view.
-%hook PINPinCloseupGalleryViewController
-- (void)setCloseupPins:(NSArray *)pins {
-    %orig(filterPromotedPins(pins));
-}
-- (void)setFeedPins:(NSArray *)pins {
-    %orig(filterPromotedPins(pins));
-}
-- (void)setPins:(NSArray *)pins {
-    %orig(filterPromotedPins(pins));
+// ======= Layer 2: Sideswipe — block ads from closeup gallery =======
+//
+// PINPinCloseupGalleryViewController uses a PINRemoteModelCollection fed through
+// a PINRemoteModelCollectionFilter (with a predicate block). The filter's predicate
+// decides which pins appear in the sideswipe gallery.
+//
+// Strategy:
+// (a) Wrap the filter's predicate to also reject promoted/ad pins.
+// (b) Hook PIThirdParty.sideswipePin to return nil (blocks 3rd-party ad sideswipes).
+// (c) Force promotedIsSideswipeDisabled → YES on all PIPin objects (Layer 3).
+
+%hook PINRemoteModelCollectionFilter
+- (id)initWithRemoteModelCollection:(id)collection predicate:(BOOL(^)(id model))predicate {
+    // Wrap the predicate to also reject promoted/ad pins
+    BOOL(^wrappedPredicate)(id model) = ^BOOL(id model) {
+        // First check original predicate
+        if (predicate && !predicate(model)) return NO;
+        // Then reject promoted pins
+        if (isPinPromoted(model)) return NO;
+        return YES;
+    };
+    return %orig(collection, wrappedPredicate);
 }
 %end
 
-// ======= Layer 3: Ads-only sections and homefeed ads gate =======
-// isAdsOnly/isAdsOnlyRP mark entire feed sections as ad-only carousels.
-// Returning NO prevents these sections from rendering at all.
-// shouldShowHomefeedAds gates whether the homefeed inserts ad pins.
+// Block third-party ad sideswipe pins entirely.
+// PIThirdParty.sideswipePin is a PIPin injected by third-party ad SDKs (Google etc.)
+%hook PIThirdParty
+- (PIPin *)sideswipePin {
+    return nil;
+}
+%end
+
+// ======= Layer 3: PIPin model-level ad suppression =======
+// - promotedIsSideswipeDisabled: forces sideswipe ads off for every pin
+// - isAdsOnly/isAdsOnlyRP: prevents ad-only feed sections from rendering
 %hook PIPin
+- (BOOL)promotedIsSideswipeDisabled {
+    return YES;
+}
 - (BOOL)isAdsOnly { return NO; }
 - (BOOL)isAdsOnlyRP { return NO; }
 %end
 
 // ======= Layer 4: Ad-specific closeup UI nodes =======
-// These render "Promoted by X" banners, sponsorship info, and ad separators
-// inside the closeup view. Returning CGSizeZero from calculateSizeThatFits:
-// collapses them to invisible without breaking the Texture node tree.
+// Collapse ad-related UI nodes to zero size without breaking the Texture node tree.
 
 %hook PINPinCloseupPinPromotionNode
 - (CGSize)calculateSizeThatFits:(CGSize)constrainedSize {
@@ -114,5 +166,41 @@ static NSArray *filterPromotedPins(NSArray *pins) {
 %hook PINPinCloseupAdCloseupRPSourceNode
 - (CGSize)calculateSizeThatFits:(CGSize)constrainedSize {
     return CGSizeZero;
+}
+%end
+
+// ======= Layer 5: Search tab — block promoted pins in search results =======
+//
+// Search ads enter via two paths:
+// (a) Server-side: PISearchRequestParameters.enablePromotedPins tells the API to
+//     include promoted pins. Hook the getter to always return NO.
+// (b) Client-side: PIContentInteractionHandler dynamically inserts ad models into
+//     the search feed. Hook to no-op.
+// (c) PINSearchResultsViewController re-enables promoted pins on filter changes.
+//     Hook to force the promoted pins argument to NO.
+
+%hook PISearchRequestParameters
+- (BOOL)enablePromotedPins {
+    return NO;
+}
+%end
+
+%hook PINSearchResultsViewController
+- (void)__resetToPinSearchResultsAndEnablePromotedPins:(BOOL)enable shouldReloadHeader:(BOOL)reload {
+    %orig(NO, reload);
+}
+%end
+
+// Block dynamic ad insertion into the search feed
+%hook PIContentInteractionHandler
+- (void)dynamicallyInsertModelsForModelInSearchFeed:(id)model atIndex:(NSInteger)index inContext:(id)context usingInsertionType:(NSInteger)type {
+    // No-op: prevent dynamic ad insertion into search results
+}
+%end
+
+// Block the API controller that fetches dynamic insertion ad payloads
+%hook PIDynamicInsertionPayloadAPIController
+- (void)getDynamicInsertionPayloadForModel:(id)model secondaryModel:(id)secondary inContext:(id)context fieldSet:(id)fieldSet columns:(NSInteger)columns insertionType:(NSInteger)insertionType feedType:(id)feedType feedQuery:(id)query {
+    // No-op: prevent fetching ad insertion payloads
 }
 %end
