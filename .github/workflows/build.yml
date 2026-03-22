@@ -1,4 +1,4 @@
-name: Debug CI
+name: Build xterest
 
 on:
   push:
@@ -11,34 +11,40 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - name: Setup libs
+    - name: Install Theos
       run: |
-        sudo apt install bash curl sudo
+        sudo apt-get install -y bash curl fakeroot
         bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
         echo "THEOS=~/theos" >> $GITHUB_ENV
 
-    - name: Make package(s)
+    - name: Build debug packages
       run: |
-        chmod +x ./compile_debug.sh
-        chmod +x ./compile_debug_rootless.sh
-        ./compile_debug.sh
-        ./compile_debug_rootless.sh
-        
-    - name: Package names
-      run: |
-        echo "ROOT=$(ls ./packages/ | grep -i 'iphoneos-arm.deb')" >> $GITHUB_ENV
-        echo "ROOTLESS=$(ls ./packages/ | grep -i 'iphoneos-arm64.deb')" >> $GITHUB_ENV
-    
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ROOT }}
-        path: ./packages/${{ env.ROOT }}
+        make package
+        make package THEOS_PACKAGE_SCHEME=rootless
 
-    - name: Upload rootless artifact
+    - name: Build release packages
+      run: |
+        make package FINALPACKAGE=1
+        make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+
+    - name: Extract dylib for sideloading
+      run: |
+        mkdir -p dist
+        # Copy all .deb packages
+        cp packages/*.deb dist/
+        # Extract the dylib from the rootless release .deb for LiveContainer/sideloading use
+        ROOTLESS_DEB=$(ls packages/ | grep -i 'iphoneos-arm64.deb' | grep -v 'debug' | head -1)
+        if [ -n "$ROOTLESS_DEB" ]; then
+          mkdir -p /tmp/deb-extract
+          dpkg-deb -x "packages/$ROOTLESS_DEB" /tmp/deb-extract
+          find /tmp/deb-extract -name "*.dylib" -exec cp {} dist/ \;
+        fi
+        ls -la dist/
+
+    - name: Upload all artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ROOTLESS }}
-        path: ./packages/${{ env.ROOTLESS }}
+        name: xterest-build
+        path: dist/
