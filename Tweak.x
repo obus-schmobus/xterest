@@ -188,7 +188,8 @@ static BOOL isPinPromoted(id pin) {
 
 // Block the API controller that fetches dynamic insertion ad payloads
 %hook PIDynamicInsertionPayloadAPIController
-- (void)getDynamicInsertionPayloadForModel:(id)model secondaryModel:(id)secondary inContext:(id)context fieldSet:(id)fieldSet columns:(NSInteger)columns insertionType:(NSInteger)insertionType feedType:(id)feedType feedQuery:(id)query {
-    // No-op: prevent fetching ad insertion payloads
+- (id)getDynamicInsertionPayloadForModel:(id)model secondaryModel:(id)secondary inContext:(id)context fieldSet:(id)fieldSet columns:(NSInteger)columns insertionType:(NSInteger)insertionType feedType:(id)feedType feedQuery:(id)query {
+    // Return nil: caller chains executeOnMainSuccess:failure: on result, messaging nil is safe
+    return nil;
 }
 %end
