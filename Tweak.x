@@ -105,16 +105,17 @@ static NSArray *filterPromotedFromArray(NSArray *objects) {
         return;
     }
     if (filtered.count == 0) return; // all were promoted
-    // Rebuild index set: take first N indexes from the original set matching filtered count
+    // Keep only indexes whose paired objects survived filtering
+    Class pinClass = NSClassFromString(@"PIPin");
     NSMutableIndexSet *newIndexes = [NSMutableIndexSet indexSet];
-    __block NSUInteger count = 0;
+    __block NSUInteger objIdx = 0;
     [indexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL *stop) {
-        if (count < filtered.count) {
+        if (objIdx >= objects.count) { *stop = YES; return; }
+        id obj = objects[objIdx];
+        if (![obj isKindOfClass:pinClass] || !isPinPromoted(obj)) {
             [newIndexes addIndex:idx];
-            count++;
-        } else {
-            *stop = YES;
         }
+        objIdx++;
     }];
     %orig(filtered, action, newIndexes, completion);
 }
@@ -126,15 +127,16 @@ static NSArray *filterPromotedFromArray(NSArray *objects) {
         return;
     }
     if (filtered.count == 0) return;
+    Class pinClass = NSClassFromString(@"PIPin");
     NSMutableIndexSet *newIndexes = [NSMutableIndexSet indexSet];
-    __block NSUInteger count = 0;
+    __block NSUInteger objIdx = 0;
     [indexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL *stop) {
-        if (count < filtered.count) {
+        if (objIdx >= objects.count) { *stop = YES; return; }
+        id obj = objects[objIdx];
+        if (![obj isKindOfClass:pinClass] || !isPinPromoted(obj)) {
             [newIndexes addIndex:idx];
-            count++;
-        } else {
-            *stop = YES;
         }
+        objIdx++;
     }];
     %orig(filtered, newIndexes);
 }
